@@ -21,13 +21,14 @@ const HIT_VIBRATION_AMPLITUDE = 2;
 const LINE_SPACING = 10;
 const BTN_RESTART_TEXT = "Играть сначала";
 const BTN_SCHEDULE_TEXT = "Запланировать поболтать";
-const BTN_SCHEDULE_URL = "https://example.com";
+const BTN_SCHEDULE_URL = "https://calendly.com/vladimir-smir/chat";
+const MISSED_LETTER_COLOR = 0xffffff;
 
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#87CEEB',
+    backgroundColor: '#000000',
     render: {
         pixelArt: true,
         antialias: false
@@ -85,15 +86,12 @@ function calculateLetterPositions() {
     let currentCharCount = 0;
     let charIndex = 0;
 
-	console.log("Debug words split");
-    
     for (let w = 0; w < words.length; w++) {
         const word = words[w];
         const wordLen = word.length;
         
         if (currentCharCount + (currentCharCount > 0 ? 1 : 0) + wordLen > charsPerLine) {
             lines.push(currentLine);
-	    console.log(`Pushed line: "${currentLine.map(c => c.char).join('')}"`);
             currentLine = [];
             currentCharCount = 0;
         }
@@ -109,10 +107,7 @@ function calculateLetterPositions() {
             charIndex++;
         }
     }
-    if (currentLine.length > 0) {
-		lines.push(currentLine);
-		console.log(`Pushed line: "${currentLine.map(c => c.char).join('')}"`);
-	}
+    if (currentLine.length > 0) lines.push(currentLine);
     
     const targets = [];
     const totalHeight = lines.length * (COLLECTED_LINE_HEIGHT + lineSpacing);
@@ -180,7 +175,7 @@ function settleLetter(scene, sprite, idx, collected) {
     } else {
         sprite.x = target.x;
         sprite.y = target.y;
-        sprite.setTintFill(0x888888);
+        sprite.setTintFill(MISSED_LETTER_COLOR);
         sprite.setAlpha(0.5);
     }
 }
@@ -288,11 +283,7 @@ function showEndScreen(scene) {
     
     scheduleBtn.setDepth(10).on('pointerdown', () => {
         console.log("Schedule clicked");
-        if (window.Telegram && window.Telegram.GameProxy) {
-            Telegram.GameProxy.openLink(BTN_SCHEDULE_URL);
-        } else {
-            window.open(BTN_SCHEDULE_URL, '_blank');
-        }
+        window.location.href = BTN_SCHEDULE_URL;
     });
     
     endScreenButtons = [restartBtn, scheduleBtn];
@@ -361,7 +352,7 @@ function spawnCollectible(scene) {
     const size = COLLECTED_LETTER_SIZE;
     const speed = COLLECTIBLE_BASE_SPEED + (Math.random() * 2 - 1) * COLLECTIBLE_SPEED_VARIANCE;
 
-    const colors = ['#0000FF', '#FF0000', '#008000', '#00FFFF', '#FF00FF', '#EE82EE', '#800080', '#FFA500', '#800000'];
+    const colors = ['#FF0000', '#008000', '#00FFFF', '#FF00FF', '#EE82EE','#FFA500'];
     const color = colors[Math.floor(Math.random() * colors.length)];
 
     const canvas = document.createElement('canvas');
