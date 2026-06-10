@@ -591,6 +591,11 @@ function triggerGameOver(scene) {
     player.body.setAllowGravity(true);
     player.body.setVelocityY(200);
     
+    for (const col of collectibles) {
+        col.destroy();
+    }
+    collectibles = [];
+    
     showGameOverText(scene);
 }
 
