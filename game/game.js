@@ -23,6 +23,13 @@ const BTN_RESTART_TEXT = "Играть сначала";
 const BTN_SCHEDULE_TEXT = "Запланировать поболтать";
 const BTN_SCHEDULE_URL = "https://calendly.com/vladimir-smir/chat";
 const MISSED_LETTER_COLOR = 0xffffff;
+const INITIAL_LIVES = 5;
+const GAME_OVER_TEXT = "game over";
+const GAME_OVER_COLOR = 0xFF0000;
+const SCORE_PER_LETTER = 100;
+const SCORE_PER_CACTUS_AVOIDED = 100;
+const SCORE_PER_HIT = -200;
+const UI_FONT_SIZE = 30;
 
 const config = {
     type: Phaser.AUTO,
@@ -67,6 +74,15 @@ let groundTile;
 let endScreenButtons = [];
 let messageBottomY = 0;
 let sceneRestarted = false;
+let lives = INITIAL_LIVES;
+let score = 0;
+let isFirstPlay = true;
+let livesText;
+let scoreText;
+let gameOverText;
+let cactiAvoided = 0;
+let cactiSpawned = 0;
+let settledLetters = [];
 
 function preload() {
     this.load.image('cactus', 'cactus.png');
@@ -172,11 +188,13 @@ function settleLetter(scene, sprite, idx, collected) {
             duration: 600,
             ease: 'Power2'
         });
+        settledLetters.push(sprite);
     } else {
         sprite.x = target.x;
         sprite.y = target.y;
         sprite.setTintFill(MISSED_LETTER_COLOR);
         sprite.setAlpha(0.5);
+        settledLetters.push(sprite);
     }
 }
 
@@ -195,6 +213,13 @@ function create() {
     obstacles = [];
     collectibles = [];
     endScreenButtons = [];
+    cactiAvoided = 0;
+    cactiSpawned = 0;
+
+    if (!isFirstPlay) {
+        lives = INITIAL_LIVES;
+        score = 0;
+    }
 
     groundY = config.height * 0.75;
     const letterPositions = calculateLetterPositions();
@@ -241,6 +266,22 @@ function create() {
         Telegram.GameProxy.ready();
     }
 
+    if (!isFirstPlay) {
+        livesText = this.add.text(20, groundY + (config.height - groundY) / 2, `❤️ x ${lives}`, {
+            fontSize: `${UI_FONT_SIZE}px`,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fill: '#FFFFFF'
+        }).setOrigin(0, 0.5).setDepth(5);
+
+        scoreText = this.add.text(config.width - 20, groundY + (config.height - groundY) / 2, `👑 x ${score}`, {
+            fontSize: `${UI_FONT_SIZE}px`,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fill: '#FFFFFF'
+        }).setOrigin(1, 0.5).setDepth(5);
+    }
+
+    settledLetters = [];
+
     this.events.on('shutdown', () => {
         for (let i = 0; i < COLLECTIBLE_MESSAGE.length; i++) {
             const key = 'collectible_' + i;
@@ -278,6 +319,7 @@ function showEndScreen(scene) {
     
     restartBtn.setDepth(10).on('pointerdown', () => {
         console.log("Restart clicked");
+        isFirstPlay = false;
         scene.scene.restart();
     });
     
@@ -335,7 +377,9 @@ function spawnObstacle(scene) {
     obs.body.setAllowGravity(false);
     obs.body.setVelocityX(-OBSTACLE_SPEED);
     obs.body.setSize(48, 94);
+    obs.setData('avoided', true);
     obstacles.push(obs);
+    cactiSpawned++;
 }
 
 function spawnCollectible(scene) {
@@ -410,6 +454,17 @@ function update(time, delta) {
             settleLetter(this, col, col.getData('charIndex'), false);
             collectibles.splice(i, 1);
         }
+        
+        if (!isFirstPlay) {
+            for (const obs of obstacles) {
+                if (obs.getData('avoided')) {
+                    cactiAvoided++;
+                    score += SCORE_PER_CACTUS_AVOIDED;
+                }
+            }
+            if (scoreText) scoreText.setText(`👑 x ${score}`);
+        }
+        
         showEndScreen(this);
     }
 
@@ -475,6 +530,20 @@ function update(time, delta) {
             continue;
         }
         if (checkCollision(player, obs)) {
+            if (obs.getData('hit')) continue;
+            obs.setData('hit', true);
+            obs.setData('avoided', false);
+            if (!isFirstPlay) {
+                lives--;
+                score = Math.max(0, score + SCORE_PER_HIT);
+                if (livesText) livesText.setText(`❤️ x ${lives}`);
+                if (scoreText) scoreText.setText(`👑 x ${score}`);
+                
+                if (lives <= 0) {
+                    triggerGameOver(this);
+                    return;
+                }
+            }
             if (!isRecovering) {
                 isRecovering = true;
                 recoverStartTime = time;
@@ -495,8 +564,69 @@ function update(time, delta) {
             continue;
         }
         if (checkCollision(player, col)) {
+            if (!isFirstPlay) {
+                score += SCORE_PER_LETTER;
+                if (scoreText) scoreText.setText(`👑 x ${score}`);
+            }
             settleLetter(this, col, col.getData('charIndex'), true);
             collectibles.splice(i, 1);
         }
     }
+    
+    if (!isFirstPlay) {
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            const obs = obstacles[i];
+            if (obs.x < -50 && obs.getData('avoided')) {
+                cactiAvoided++;
+                score += SCORE_PER_CACTUS_AVOIDED;
+                if (scoreText) scoreText.setText(`👑 x ${score}`);
+            }
+        }
+    }
+}
+
+function triggerGameOver(scene) {
+    gameOver = true;
+    player.body.setEnable(true);
+    player.body.setAllowGravity(true);
+    player.body.setVelocityY(200);
+    
+    showGameOverText(scene);
+}
+
+function showGameOverText(scene) {
+    for (const letter of settledLetters) {
+        letter.destroy();
+    }
+    settledLetters = [];
+
+    const textureKey = 'gameOverText';
+    if (scene.textures.exists(textureKey)) {
+        scene.textures.remove(textureKey);
+    }
+    
+    const size = COLLECTED_LETTER_SIZE;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const scale = 2;
+    //canvas.width = Math.ceil(size / scale);
+    //canvas.height = Math.ceil(size / scale);
+    canvas.width = Math.ceil(config.width / scale);
+    canvas.height = Math.ceil(size * 2 / scale);
+    ctx.scale(1 / scale, 1 / scale);
+    ctx.font = `bold ${size}px Arial, Helvetica, sans-serif`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(GAME_OVER_TEXT, config.width / 2, size);
+    
+    const texture = scene.textures.createCanvas(textureKey, canvas.width, canvas.height);
+    texture.getSourceImage().getContext('2d').drawImage(canvas, 0, 0);
+    texture.refresh();
+    
+    gameOverText = scene.add.sprite(config.width / 2, messageBottomY, textureKey).setOrigin(0.5, 0.5);
+    gameOverText.setScale(2);
+    gameOverText.setTintFill(GAME_OVER_COLOR);
+    
+    showEndScreen(scene);
 }
