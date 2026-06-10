@@ -596,6 +596,11 @@ function triggerGameOver(scene) {
     }
     collectibles = [];
     
+    for (const obs of obstacles) {
+        obs.destroy();
+    }
+    obstacles = [];
+    
     showGameOverText(scene);
 }
 
@@ -614,8 +619,6 @@ function showGameOverText(scene) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const scale = 2;
-    //canvas.width = Math.ceil(size / scale);
-    //canvas.height = Math.ceil(size / scale);
     canvas.width = Math.ceil(config.width / scale);
     canvas.height = Math.ceil(size * 2 / scale);
     ctx.scale(1 / scale, 1 / scale);
