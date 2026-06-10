@@ -3,7 +3,7 @@ if (window.Telegram && window.Telegram.GameProxy) {
 }
 
 const LEVEL_DURATION = 30;
-const OBSTACLE_SPEED = 150;
+const OBSTACLE_SPEED = 250;
 const COLLECTIBLE_BASE_SPEED = 100;
 const COLLECTIBLE_SPEED_VARIANCE = 33;
 const COLLECTIBLE_MESSAGE = "с днём рождения";
@@ -19,6 +19,9 @@ const HIT_TINT_COLOR = 0x8B0000;
 const HIT_DURATION = 250;
 const HIT_VIBRATION_AMPLITUDE = 2;
 const LINE_SPACING = 10;
+const BTN_RESTART_TEXT = "Играть сначала";
+const BTN_SCHEDULE_TEXT = "Запланировать поболтать";
+const BTN_SCHEDULE_URL = "https://example.com";
 
 const config = {
     type: Phaser.AUTO,
@@ -59,9 +62,15 @@ let gameTime = 0;
 let gameOver = false;
 let isRecovering = false;
 let recoverStartTime = 0;
+let groundTile;
+let endScreenButtons = [];
+let messageBottomY = 0;
+let sceneRestarted = false;
 
 function preload() {
     this.load.image('cactus', 'cactus.png');
+    this.load.image('bg', 'bg.png');
+    this.load.image('ground', 'ground.png');
 }
 
 function calculateLetterPositions() {
@@ -122,7 +131,7 @@ function calculateLetterPositions() {
             x += cellSize;
         }
     }
-    return targets;
+    return { targets, bottomY: startY + (lines.length - 1) * (COLLECTED_LINE_HEIGHT + lineSpacing) + cellSize / 2 };
 }
 
 function createPixelTextTexture(scene, text, fontSize, color, fontStyle) {
@@ -177,10 +186,33 @@ function settleLetter(scene, sprite, idx, collected) {
 }
 
 function create() {
-    groundY = config.height * 0.75;
-    letterTargets = calculateLetterPositions();
+    gameTime = 0;
+    gameOver = false;
+    isRecovering = false;
+    skipGroundCheck = false;
+    currentScaleY = 1.0;
+    targetScaleY = 1.0;
+    isOnGround = true;
+    lastObstacleTime = 0;
+    lastCollectibleTime = 0;
+    nextCollectibleCharIndex = 0;
+    nextCollectibleCharId = 0;
+    obstacles = [];
+    collectibles = [];
+    endScreenButtons = [];
 
-    this.add.rectangle(config.width / 2, groundY + (config.height - groundY) / 2, config.width, config.height - groundY, 0x654321);
+    groundY = config.height * 0.75;
+    const letterPositions = calculateLetterPositions();
+    letterTargets = letterPositions.targets;
+    messageBottomY = letterPositions.bottomY;
+
+    const bg = this.add.tileSprite(config.width / 2, config.height / 2, config.width, config.height, 'bg');
+    bg.setScrollFactor(0);
+    bg.tileScaleX = 0.25;
+    bg.tileScaleY = 0.25;
+
+    groundTile = this.add.tileSprite(config.width / 2, groundY + (config.height - groundY) / 2, config.width, config.height - groundY, 'ground');
+    groundTile.setScrollFactor(0);
 
     const textureKey = createPixelTextTexture(this, 'Ы', 72, '#FFE135', 'bold italic');
 
@@ -213,6 +245,97 @@ function create() {
     if (window.Telegram && window.Telegram.GameProxy) {
         Telegram.GameProxy.ready();
     }
+
+    this.events.on('shutdown', () => {
+        for (let i = 0; i < COLLECTIBLE_MESSAGE.length; i++) {
+            const key = 'collectible_' + i;
+            if (this.textures.exists(key)) {
+                this.textures.remove(key);
+            }
+        }
+        if (this.textures.exists('pixelText')) {
+            this.textures.remove('pixelText');
+        }
+    });
+}
+
+function showEndScreen(scene) {
+    const btnWidth = 300;
+    const btnHeight = 50;
+    const playerTopY = groundY - 100;
+    const btnY = (messageBottomY + playerTopY) / 2;
+    
+    const restartBtn = scene.add.text(config.width / 2, btnY - 40, BTN_RESTART_TEXT, {
+        fontSize: '24px',
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fill: '#FFFFFF',
+        backgroundColor: '#4CAF50',
+        padding: { x: 20, y: 10 }
+    }).setOrigin(0.5, 0.5).setInteractive({ useHandCursor: true });
+    
+    const scheduleBtn = scene.add.text(config.width / 2, btnY + 40, BTN_SCHEDULE_TEXT, {
+        fontSize: '24px',
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fill: '#FFFFFF',
+        backgroundColor: '#2196F3',
+        padding: { x: 20, y: 10 }
+    }).setOrigin(0.5, 0.5).setInteractive({ useHandCursor: true });
+    
+    restartBtn.setDepth(10).on('pointerdown', () => {
+        console.log("Restart clicked");
+        scene.scene.restart();
+    });
+    
+    scheduleBtn.setDepth(10).on('pointerdown', () => {
+        console.log("Schedule clicked");
+        if (window.Telegram && window.Telegram.GameProxy) {
+            Telegram.GameProxy.openLink(BTN_SCHEDULE_URL);
+        } else {
+            window.open(BTN_SCHEDULE_URL, '_blank');
+        }
+    });
+    
+    endScreenButtons = [restartBtn, scheduleBtn];
+    sceneRestarted = true;
+}
+
+function restartGame(scene) {
+    scene.tweens.killAll();
+    
+    for (const btn of endScreenButtons) {
+        btn.destroy();
+    }
+    endScreenButtons = [];
+    
+    for (const obs of obstacles) {
+        obs.destroy();
+    }
+    obstacles = [];
+    
+    for (const col of collectibles) {
+        col.destroy();
+    }
+    collectibles = [];
+    
+    nextCollectibleCharIndex = 0;
+    nextCollectibleCharId = 0;
+    lastObstacleTime = 0;
+    lastCollectibleTime = 0;
+    gameTime = 0;
+    gameOver = false;
+    isRecovering = false;
+    skipGroundCheck = false;
+    currentScaleY = 1.0;
+    targetScaleY = 1.0;
+    isOnGround = true;
+    
+    player.y = groundY - 100;
+    player.body.setEnable(true);
+    player.body.setAllowGravity(true);
+    player.body.setVelocityY(0);
+    player.setScale(2, 2);
+    player.clearTint();
+    player.x = config.width / 2;
 }
 
 function spawnObstacle(scene) {
@@ -254,6 +377,9 @@ function spawnCollectible(scene) {
     ctx.fillText(letter, size / 2, size / 2);
 
     const textureKey = 'collectible_' + idx;
+    if (scene.textures.exists(textureKey)) {
+        scene.textures.remove(textureKey);
+    }
     const texture = scene.textures.createCanvas(textureKey, canvas.width, canvas.height);
     texture.getSourceImage().getContext('2d').drawImage(canvas, 0, 0);
     texture.refresh();
@@ -293,6 +419,7 @@ function update(time, delta) {
             settleLetter(this, col, col.getData('charIndex'), false);
             collectibles.splice(i, 1);
         }
+        showEndScreen(this);
     }
 
     if (skipGroundCheck) {
@@ -332,6 +459,8 @@ function update(time, delta) {
     if (skipGroundCheck) {
         skipGroundCheck = false;
     }
+
+    groundTile.tilePositionX += OBSTACLE_SPEED * deltaSec;
 
     lastObstacleTime += deltaSec;
     const timeRemaining = LEVEL_DURATION - gameTime;
