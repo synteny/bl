@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Telegram Platformer Game Backend and Hosting
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: nodejs18.x
+
+Resources:
+  GameBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, HEAD]
+            AllowedOrigins: ['*']
+
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "OAI for ${GameBucket}"
+
+  GameBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref GameBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:GetObject
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+            Resource: !Sub arn:aws:s3:::${GameBucket}/*
+
+  GameDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultCacheBehavior:
+          TargetOriginId: GameBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues:
+            QueryString: false
+        Origins:
+          - Id: GameBucketOrigin
+            DomainName: !GetAtt GameBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+
+  BotApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'POST, OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+  TelegramBotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: bot/
+      Handler: handler.handler
+      Events:
+        Webhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BotApi
+            Path: /webhook
+            Method: post
+      Environment:
+        Variables:
+          GAME_URL: !Sub https://${GameDistribution.DomainName}
+          TELEGRAM_TOKEN: !Ref TelegramTokenParam
+          GAME_SHORT_NAME: !Ref GameShortNameParam
+
+Parameters:
+  TelegramTokenParam:
+    Type: String
+    NoEcho: true
+    Description: Telegram Bot Token
+  GameShortNameParam:
+    Type: String
+    Default: my_platformer
+    Description: Telegram Game Short Name
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL for Bot
+    Value: !Sub https://${BotApi}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook
+  GameUrl:
+    Description: CloudFront URL for the game
+    Value: !Sub https://${GameDistribution.DomainName}
+  GameBucketName:
+    Description: S3 bucket name for game assets
+    Value: !Ref GameBucket
+  GameDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref GameDistribution

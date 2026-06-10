@@ -1,0 +1,6 @@
+{
+  "name": "telegram-bot-lambda",
+  "version": "1.0.0",
+  "main": "handler.js",
+  "dependencies": {}
+}
